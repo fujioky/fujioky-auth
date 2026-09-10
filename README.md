@@ -1,6 +1,6 @@
 # fujioky-auth
 
-A reusable Python package for FastAPI applications using Logto. Version 0.1.0.
+A reusable Python package for FastAPI applications using Logto. Version 0.2.0.
 No extra authentication service or database is required. Each application retains
 its own users, database, cookie, Logto client and authorization policy.
 
@@ -24,7 +24,7 @@ the local user ID, preserving associations with private data.
 Install the versioned source from GitHub (not published to PyPI):
 
 ```sh
-pip install "fujioky-auth @ git+https://github.com/fujioky/fujioky-auth.git@v0.1.0"
+pip install "fujioky-auth @ git+https://github.com/fujioky/fujioky-auth.git@v0.2.0"
 ```
 
 For development:
@@ -129,3 +129,23 @@ by Logto; local sessions have a separate absolute lifetime and cannot renew fore
 Sources: [Logto sign-out](https://docs.logto.io/end-user-flows/sign-out),
 [Account center](https://docs.logto.io/end-user-flows/account-settings/by-account-center-ui),
 [OIDC back-channel logout](https://openid.net/specs/openid-connect-backchannel-1_0.html).
+
+## Shared account interface
+
+`/auth/account` opens the Logto-hosted account center and synchronizes profile
+changes when the user returns to the application.
+Place `<span data-lyra-auth></span>` in the application header and load
+`<script src="/auth/ui.js" defer></script>` once. Signed-in users see an avatar;
+hover or keyboard focus reveals shortcuts, and clicking opens the hosted account center.
+Touch users enter the account center directly. Device and app authorization
+shortcuts remain available in the local navigation.
+
+Optional `AuthConfig.profile_links` adds application-specific destinations:
+
+```python
+profile_links=({"href": "/oauth/connections", "label": "Authorized applications",
+                "description": "Manage client access"},)
+```
+
+Only local paths are accepted. Each application retains independent sessions
+and displays only the current user's information.

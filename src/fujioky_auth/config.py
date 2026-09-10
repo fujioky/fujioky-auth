@@ -15,6 +15,8 @@ class AuthConfig:
     dev_login: bool = False
     account_center: str = ""
 
+    profile_links: tuple = ()
+
     @property
     def ready(self):
         return bool(self.issuer and self.client_id and self.client_secret and self.session_secret)
@@ -30,4 +32,5 @@ class AuthConfig:
                    client_secret=settings.oidc_client_secret, session_secret=settings.session_secret,
                    cookie_name=settings.cookie_name, session_ttl=settings.session_ttl,
                    scopes=settings.oidc_scopes, dev_login=settings.dev_login,
-                   account_center=getattr(settings, "oidc_account_center", ""))
+                   account_center=getattr(settings, "oidc_account_center", ""),
+                   profile_links=getattr(settings, "profile_links", ()))

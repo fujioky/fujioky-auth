@@ -291,7 +291,7 @@ def test_account_updates_keep_local_id(env):
     async def info(_):return {"sub":"alice@test.com","email":"updated@test.com","email_verified":True,"name":"New"}
     manager.provider.userinfo=info
     with sessions() as db: before=db.get(manager.Session,manager.session_id(raw)).user_id
-    assert client.get("/auth/account/return",follow_redirects=False).status_code==302
+    assert client.get("/auth/account/return",follow_redirects=False).headers["location"]=="/"
     assert client.get("/auth/whoami").json()["email"]=="updated@test.com"
     with sessions() as db: assert db.get(manager.Session,manager.session_id(raw)).user_id==before
 
@@ -366,3 +366,32 @@ def test_provider_http_requests_and_rotation_errors(env,monkeypatch):
     token_call=next(r for r in calls if r.url.path.endswith("/token"))
     assert token_call.headers["authorization"].startswith("Basic ")
     assert "client-secret" not in str(token_call.url)
+
+
+def test_shared_ui_script_available_without_login(env):
+    _, _, client = env
+    r = client.get('/auth/ui.js')
+    assert r.status_code == 200
+    assert 'javascript' in r.headers['content-type']
+    assert '/auth/account?section=profile' in r.text
+    assert 'alice@test.com' not in r.text
+    assert client.get('/auth/ui.js', headers={'host': 'untrusted.test'}).status_code == 404
+
+
+def test_profile_links_are_local_and_available_only_when_signed_in(tmp_path):
+    from fujioky_auth.web import build_router
+    manager, sessions, app = build(tmp_path / 'links.db')
+    manager.config = replace(manager.config, profile_links=(
+        {'href': '/oauth/connections', 'label': 'Authorized clients'},
+        {'href': '//evil.test', 'label': 'bad external'},
+        {'href': '/\\evil.test', 'label': 'bad backslash'},
+    ))
+    app.router.routes = []
+    app.include_router(build_router(manager))
+    with TestClient(app, base_url=manager.config.base_url) as client:
+        assert client.get('/auth/whoami').json()['profileLinks'] == []
+        seed((manager, sessions, client))
+        assert client.get('/auth/whoami').json()['profileLinks'] == [
+            {'href': '/oauth/connections', 'label': 'Authorized clients'}]
+        response = client.get('/auth/account', follow_redirects=False)
+        assert response.headers['location'].startswith('https://auth.test/account/profile?')

@@ -12,10 +12,11 @@ from sqlalchemy.exc import IntegrityError
 
 from .manager import digest, now
 from .provider import InvalidToken, ProviderUnavailable
+from .ui import CSS, JS
 
 NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
 PAGE_HEADERS = {**NO_STORE, "X-Frame-Options": "DENY", "Content-Security-Policy":
-                "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}
+                "default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self' https: data:; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}
 
 
 def safe_next(value):
@@ -56,7 +57,7 @@ async def form(request):
 
 def page(config, title, body):
     esc = html.escape
-    return HTMLResponse('''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'''+esc(title)+" · "+esc(config.app_name.upper())+'''</title><style>body{font:17px/1.7 system-ui;background:#f5f5f3;color:#202623;padding:28px 16px}main{max-width:660px;margin:4vh auto;background:white;padding:30px;border-radius:16px}h1{font-size:26px}a{color:#24553f}button{font:inherit;border:0;border-radius:8px;background:#163f2e;color:white;padding:10px 20px;cursor:pointer}article{border-top:1px solid #ddd;padding:16px 0}.muted{color:#626b65;overflow-wrap:anywhere}</style><main><a href="/">'''+esc(config.app_name.upper())+"</a><h1>"+esc(title)+"</h1>"+body+"</main></html>", headers=PAGE_HEADERS)
+    return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+CSS+'</style><header><a class="brand" href="/">'+esc(config.app_name.upper())+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main><script src="/auth/ui.js" defer></script></html>', headers=PAGE_HEADERS)
 
 
 def hidden(name, value):
@@ -70,11 +71,22 @@ def build_router(manager):
             raise HTTPException(404)
     router = APIRouter(dependencies=[Depends(host)])
 
+    def links():
+        return [dict(x) for x in cfg.profile_links
+                if isinstance(x, dict) and x.get("label") and x.get("href")
+                and safe_next(x["href"]) == x["href"]
+                and x["href"] != "/"]
+
+    @router.get("/auth/ui.js")
+    async def account_script():
+        return Response(JS, media_type="application/javascript", headers={"Cache-Control":"public, max-age=300"})
+
     @router.get("/auth/whoami")
     async def whoami(user=Depends(manager.current_user)):
         return JSONResponse({"signedIn": bool(user), "admin": bool(user and user.is_admin),
                              "name": user.name if user else None, "email": user.email if user else None,
-                             "avatar": user.avatar if user else "", "authReady": cfg.ready}, headers=NO_STORE)
+                             "avatar": user.avatar if user else "", "authReady": cfg.ready,
+                             "profileLinks": links() if user else []}, headers=NO_STORE)
 
     @router.get("/auth/login")
     async def login(request: Request, next: str = "/", reauthenticate: bool = False):
@@ -252,7 +264,7 @@ def build_router(manager):
         return response
 
     @router.get("/auth/account")
-    async def account(section: str = "security", user=Depends(manager.require_user)):
+    async def account(section: str = "profile", user=Depends(manager.require_user)):
         if not cfg.account_center:
             raise HTTPException(503,{"error":"账号中心尚未配置"})
         if section not in ("profile","security","email","password"):
@@ -275,6 +287,6 @@ def build_router(manager):
             return RedirectResponse("/auth/login?next=/auth/sessions",status_code=302,headers=NO_STORE)
         except ProviderUnavailable:
             raise HTTPException(503,{"error":"账号资料暂时无法同步，请稍后重试"}) from None
-        return RedirectResponse("/auth/sessions",status_code=302,headers=NO_STORE)
+        return RedirectResponse("/",status_code=302,headers=NO_STORE)
 
     return router
