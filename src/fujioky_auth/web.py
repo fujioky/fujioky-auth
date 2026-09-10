@@ -63,6 +63,9 @@ def page(config, title, body, form_redirect=None):
         headers["Content-Security-Policy"] = headers["Content-Security-Policy"].replace(
             "form-action 'self';", "form-action 'self' " + destination + ";")
     esc = html.escape
+    if config.standalone:
+        body = '<nav class="account-tabs" aria-label="账户导航"><a href="/auth/account">个人资料</a><a href="/security">账号与安全</a><a href="/sessions">登录设备</a><a href="/apps">已授权应用</a></nav>'+body
+        body = body.replace('/auth/account?section=security','/security').replace('href="/auth/sessions"','href="/sessions"')
     return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+CSS+'</style><header><a class="brand" href="/">'+esc(config.app_name.upper())+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main><script src="/auth/ui.js" defer></script></html>', headers=headers)
 
 
@@ -92,7 +95,7 @@ def build_router(manager):
         return JSONResponse({"signedIn": bool(user), "admin": bool(user and user.is_admin),
                              "name": user.name if user else None, "email": user.email if user else None,
                              "avatar": user.avatar if user else "", "authReady": cfg.ready,
-                             "profileLinks": links() if user else []}, headers=NO_STORE)
+                             "accountBase": cfg.base_url if cfg.standalone else cfg.portal_url, "profileLinks": links() if user else []}, headers=NO_STORE)
 
     @router.get("/auth/login")
     async def login(request: Request, next: str = "/", reauthenticate: bool = False):
@@ -225,14 +228,22 @@ def build_router(manager):
             return JSONResponse({"error":"temporarily_unavailable"},status_code=503,headers=NO_STORE)
         ident = digest(cfg.issuer+":"+claims["jti"])
         db.execute(delete(manager.LogoutEvent).where(manager.LogoutEvent.expires < now()))
-        if db.get(manager.LogoutEvent,ident):
+        async def delivered():
+            relay = getattr(request.app.state, "relay_logout", None)
+            if relay:
+                try:
+                    await relay(data["logout_token"])
+                except ProviderUnavailable:
+                    return JSONResponse({"error":"temporarily_unavailable"},status_code=503,headers=NO_STORE)
             return Response(status_code=200,headers=NO_STORE)
+        if db.get(manager.LogoutEvent,ident):
+            return await delivered()
         db.add(manager.LogoutEvent(id=ident,expires=now()+600))
         try:
             db.flush()
         except IntegrityError:
             db.rollback()
-            return Response(status_code=200,headers=NO_STORE)
+            return await delivered()
         query = select(manager.Session.id).where(manager.Session.issuer==cfg.issuer,
                             manager.Session.created <= claims["iat"], manager.Session.revoked.is_(False))
         if claims.get("sid"):
@@ -241,7 +252,7 @@ def build_router(manager):
             query = query.where(manager.Session.sub==claims["sub"])
         manager.revoke_sessions(db,list(db.scalars(query)))
         db.commit()
-        return Response(status_code=200,headers=NO_STORE)
+        return await delivered()
 
     @router.get("/auth/sessions")
     async def sessions(request: Request, db=Depends(get_db), user=Depends(manager.current_user)):
@@ -313,6 +324,11 @@ def build_router(manager):
     @router.get("/auth/account")
     async def account(request: Request, section: str = "profile", saved: bool = False,
                       db=Depends(get_db), user=Depends(manager.current_user)):
+        if cfg.portal_url:
+            destination = "/security" if section != "profile" else "/auth/account"
+            return RedirectResponse(cfg.portal_url.rstrip("/")+destination,status_code=302,headers=NO_STORE)
+        if cfg.standalone and section == "security":
+            return RedirectResponse("/security",status_code=302,headers=NO_STORE)
         if section not in ("profile","security","email","password"):
             raise HTTPException(400)
         if not user:

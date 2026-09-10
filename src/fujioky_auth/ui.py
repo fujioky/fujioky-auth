@@ -1,9 +1,12 @@
 """Shared account styling and avatar navigation; applications supply optional links."""
 
 CSS = '''
+.account-tabs{display:flex;gap:24px;padding:0 0 24px;margin-bottom:28px;border-bottom:1px solid #deded5}.account-tabs a{white-space:nowrap}.account-row{display:flex;justify-content:space-between;align-items:center;gap:24px}.account-card{padding:24px;border:1px solid #deded5;border-radius:12px;margin:18px 0}body{min-width:800px}
+
 .profile-intro{display:flex;align-items:center;gap:22px;margin-bottom:32px}.profile-avatar{display:grid;place-items:center;width:80px;height:80px;object-fit:cover;border-radius:50%;background:#eae9e2;font-size:28px}.profile-field{display:block;margin:22px 0;max-width:560px}.profile-field input{display:block;width:100%;margin-top:8px;padding:12px;border:1px solid #deded5;border-radius:6px;background:#eeede6;color:inherit;font:inherit}
 
 *{box-sizing:border-box}body{margin:0;background:#f5f4ef;color:#24251f;font:15px/1.7 Arial,"PingFang SC",sans-serif}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}header{max-width:980px;margin:auto;padding:28px 24px;border-bottom:1px solid #deded5;display:flex;justify-content:space-between;align-items:center}.brand{font-size:12px;font-weight:700;letter-spacing:3px}main{max-width:880px;margin:48px auto;padding:0 24px 64px}h1{font:400 36px/1.25 Georgia,serif;margin:0 0 30px}h2{font-size:17px;margin:0 0 4px}.muted{color:#77786f;overflow-wrap:anywhere}button{font:inherit;border:1px solid #deded5;background:#24251f;color:#f5f4ef;padding:10px 18px;cursor:pointer}button:focus-visible,a:focus-visible{outline:2px solid #c9784e;outline-offset:4px}article{padding:22px 0;border-top:1px solid #deded5}
+@media(prefers-color-scheme:dark){body{background:#181914;color:#f5f4ef}.muted{color:#b5b6aa}.profile-field input{background:#303229;border-color:#4b4e40}.profile-avatar{background:#303229}button{background:#dedfce;color:#24251f}.account-card,.account-tabs,header,article{border-color:#4b4e40}}
 '''
 
 JS = r'''
@@ -18,14 +21,15 @@ slots.forEach(function(slot){if(slot.dataset.accountMounted)return;slot.dataset.
 function link(href,label){var a=document.createElement('a');a.href=href;a.textContent=label;return a;}
 if(!d.signedIn){if(d.authReady)slot.appendChild(link('/auth/login?next='+encodeURIComponent(location.pathname+location.search),'登录'));return;}
 var wrap=document.createElement('div');wrap.className='fujioky-user';
-var avatar=link('/auth/account?section=profile',(d.name||'U').slice(0,1).toUpperCase());avatar.className='fujioky-avatar';avatar.setAttribute('aria-label','个人账户：'+(d.name||'用户'));avatar.setAttribute('aria-expanded','false');
+var portal=d.accountBase||'';var avatar=link(portal+'/auth/account',(d.name||'U').slice(0,1).toUpperCase());avatar.className='fujioky-avatar';avatar.setAttribute('aria-label','个人账户：'+(d.name||'用户'));avatar.setAttribute('aria-expanded','false');
 if(d.avatar && /^https:\/\//i.test(d.avatar)){var im=document.createElement('img');im.src=d.avatar;im.alt='';im.referrerPolicy='no-referrer';im.onerror=function(){avatar.textContent=(d.name||'U').slice(0,1).toUpperCase();};avatar.textContent='';avatar.appendChild(im);}
 var menu=document.createElement('nav');menu.className='fujioky-menu';menu.setAttribute('aria-label','账户快捷操作');
 var inner=document.createElement('div');inner.className='fujioky-menu-inner';
 var name=document.createElement('div');name.className='fujioky-menu-name';name.textContent=d.name||'用户';inner.appendChild(name);
 var email=document.createElement('div');email.className='fujioky-menu-email';email.textContent=d.email||'';inner.appendChild(email);
-inner.appendChild(link('/auth/account?section=profile','个人账户'));inner.appendChild(link('/auth/account?section=security','账号与安全'));inner.appendChild(link('/auth/sessions','登录设备'));
-(d.profileLinks||[]).forEach(function(l){if(/^\/(?!\/)/.test(l.href)&&!/[\\\x00-\x1f]/.test(l.href))inner.appendChild(link(l.href,l.label));});
+inner.appendChild(link(portal+'/auth/account','个人账户'));inner.appendChild(link(portal?portal+'/security':'/auth/account?section=security','账号与安全'));inner.appendChild(link(portal?portal+'/sessions':'/auth/sessions','登录设备'));
+if(portal)inner.appendChild(link(portal+'/apps','已授权应用'));
+(d.profileLinks||[]).filter(function(l){return !portal||l.href!='/oauth/connections';}).forEach(function(l){if(/^\/(?!\/)/.test(l.href)&&!/[\\\x00-\x1f]/.test(l.href))inner.appendChild(link(l.href,l.label));});
 inner.appendChild(link('/auth/logout','退出登录'));menu.appendChild(inner);wrap.appendChild(avatar);wrap.appendChild(menu);slot.appendChild(wrap);
 var toggle=document.createElement('button');toggle.type='button';toggle.className='fujioky-menu-toggle';toggle.textContent='⌄';toggle.setAttribute('aria-label','展开账户菜单');toggle.setAttribute('aria-expanded','false');wrap.insertBefore(toggle,menu);toggle.addEventListener('click',function(){if(wrap.hasAttribute('data-open'))hide();else show();});
 function show(){toggle.setAttribute('aria-expanded','true');wrap.setAttribute('data-open','');avatar.setAttribute('aria-expanded','true');}

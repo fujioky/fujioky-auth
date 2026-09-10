@@ -155,3 +155,15 @@ and displays only the current user's information.
 `/auth/account` renders the shared profile page using Logto Account API, available without profile-collection fields. Enable Account API and set Name and Avatar permissions to Edit. The user's existing `profile` scope and opaque access token are used server-side.
 
 Users can edit their display name and an HTTPS avatar image URL, or clear the avatar. The endpoint only updates these two fields. Security settings remain at `/auth/account?section=security`. Logged-out visitors are sent through normal login before returning.
+
+
+## Standalone account center
+
+Run `uvicorn fujioky_auth.portal:create_app --factory`. The included Dockerfile exposes port 8080.
+Set `BASE_URL`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `SESSION_SECRET` (at least 32 characters), and `DATABASE_URL` (SQLite).
+Set `CORS_ORIGINS` to the exact, comma-separated website origins allowed to read the credentialed `/auth/whoami` endpoint.
+The portal provides profile editing, security links, verified session management, and application grants. Sensitive account operations use the end-user Logto Account API, never a management token.
+
+Applications set `ACCOUNT_PORTAL_URL` to use the central account menu. Applications sharing the same Logto client register their own callback and logged-out URLs. Configure the Logto back-channel URI to the portal and set `LOGOUT_TARGETS` to the other applications' fixed HTTPS back-channel endpoints. Only validated logout tokens are forwarded; recipients verify them independently. Failed delivery returns 503 and can be retried with the same token.
+
+For BIDE MCP grants, optionally set `BIDE_ACCOUNT_API` to the HTTPS `/api/account/connections` endpoint. It resolves the caller via Logto userinfo and restricts grants by the verified subject.

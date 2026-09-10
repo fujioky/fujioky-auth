@@ -176,3 +176,25 @@ class LogtoProvider:
             if isinstance(exc, InvalidToken):
                 raise
             raise ProviderUnavailable("Account temporarily unavailable") from None
+
+    async def account_request(self, access_token, method, path, data=None, verification=""):
+        from urllib.parse import urlsplit
+        if not path.startswith(("/api/my-account/", "/api/verifications/")) or ".." in path:
+            raise ValueError("Invalid account endpoint")
+        origin = urlsplit(self.config.issuer)
+        headers = {"Authorization": "Bearer " + access_token}
+        if verification:
+            headers["logto-verification-id"] = verification
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.request(method, origin.scheme+"://"+origin.netloc+path,
+                    headers=headers, **({"json":data} if data is not None else {}))
+            if response.status_code == 401:
+                raise InvalidToken("Account token rejected")
+            if response.status_code in (400,403,404,409,422,429):
+                raise AccountDenied("Account operation rejected")
+            response.raise_for_status()
+            return response.json() if response.content else None
+        except (httpx.HTTPError, ValueError) as exc:
+            if isinstance(exc, InvalidToken): raise
+            raise ProviderUnavailable("Account service unavailable") from None

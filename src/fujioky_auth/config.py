@@ -16,6 +16,8 @@ class AuthConfig:
     account_center: str = ""
 
     profile_links: tuple = ()
+    portal_url: str = ""
+    standalone: bool = False
 
     @property
     def ready(self):
@@ -33,4 +35,5 @@ class AuthConfig:
                    cookie_name=settings.cookie_name, session_ttl=settings.session_ttl,
                    scopes=settings.oidc_scopes, dev_login=settings.dev_login,
                    account_center=getattr(settings, "oidc_account_center", ""),
-                   profile_links=getattr(settings, "profile_links", ()))
+                   profile_links=getattr(settings, "profile_links", ()),
+                   portal_url=getattr(settings, "account_portal_url", ""))
