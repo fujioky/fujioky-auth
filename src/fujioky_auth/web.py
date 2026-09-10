@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from .manager import digest, now
-from .provider import InvalidToken, ProviderUnavailable
+from .provider import AccountDenied, InvalidToken, ProviderUnavailable
 from .ui import CSS, JS
 
 NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
@@ -277,14 +277,94 @@ def build_router(manager):
             manager.clear_cookie(response)
         return response
 
+    def profile_page(request, user, values, message="", status=200):
+        esc = html.escape
+        name, avatar = str(values.get("name") or ""), str(values.get("avatar") or "")
+        picture = ('<img class="profile-avatar" referrerpolicy="no-referrer" src="'+esc(avatar, quote=True)+'" alt="头像">') if avatar.startswith("https://") else '<span class="profile-avatar">'+esc((name or "U")[:1].upper())+'</span>'
+        body = '<div class="profile-intro">'+picture+'<div><h2>'+esc(name or "个人账户")+'</h2><p class="muted">'+esc(user.email)+'</p></div></div>'
+        if message:
+            body += '<p role="status">'+esc(message)+'</p>'
+        body += '<form method="post" action="/auth/account">'+hidden("csrf",csrf(request,"profile:"+str(user.id)))+"""
+<label class="profile-field">显示姓名<input name="name" autocomplete="name" maxlength="120" required value="""+'"'+esc(name,quote=True)+'"'+""" ></label>
+<label class="profile-field">头像图片地址<input name="avatar" type="url" maxlength="600" placeholder="https://…" value="""+'"'+esc(avatar,quote=True)+'"'+""" ></label>
+<p class="muted">使用 HTTPS 图片地址，留空可移除头像。资料会同步到你的 FUJIOKY 账户。</p>
+<button type="submit">保存资料</button></form>
+<p><a href="/auth/account?section=security">账号与安全 ↗</a> · <a href="/auth/sessions">登录设备</a></p>"""
+        response = page(cfg,"个人资料",body)
+        response.status_code = status
+        return response
+
+    async def read_account(request, db):
+        row = request.state.auth_session
+        token = manager.decrypt(row.tokens)["access_token"]
+        values = await manager.provider.account(token)
+        if values.get("id") != row.sub:
+            raise InvalidToken("Account identity changed")
+        return token, values
+
+    def account_login(request, db):
+        row = request.state.auth_session
+        manager.revoke_sessions(db,[row.id])
+        db.commit()
+        response = RedirectResponse("/auth/login?next=/auth/account",status_code=303,headers=NO_STORE)
+        manager.clear_cookie(response)
+        return response
+
     @router.get("/auth/account")
-    async def account(section: str = "profile", user=Depends(manager.require_user)):
-        if not cfg.account_center:
-            raise HTTPException(503,{"error":"账号中心尚未配置"})
+    async def account(request: Request, section: str = "profile", saved: bool = False,
+                      db=Depends(get_db), user=Depends(manager.current_user)):
         if section not in ("profile","security","email","password"):
             raise HTTPException(400)
-        url = cfg.account_center.rstrip("/")+"/"+section+"?"+urlencode({"redirect":cfg.base_url+"/auth/account/return"})
-        return RedirectResponse(url,status_code=302,headers=NO_STORE)
+        if not user:
+            return RedirectResponse("/auth/login?"+urlencode({"next":"/auth/account?section="+section}),status_code=302,headers=NO_STORE)
+        if section != "profile":
+            if not cfg.account_center:
+                raise HTTPException(503,{"error":"账号中心尚未配置"})
+            url = cfg.account_center.rstrip("/")+"/"+section+"?"+urlencode({"redirect":cfg.base_url+"/auth/account/return"})
+            return RedirectResponse(url,status_code=302,headers=NO_STORE)
+        try:
+            _, values = await read_account(request,db)
+        except (InvalidToken,KeyError):
+            return account_login(request,db)
+        except (AccountDenied,ProviderUnavailable):
+            return page(cfg,"个人资料",'<p>账户资料暂时无法读取，请稍后重试。</p><p><a href="/auth/account">重新加载</a></p>')
+        if "name" in values:
+            user.name = str(values.get("name") or "")[:120]
+        if "avatar" in values:
+            user.avatar = str(values.get("avatar") or "")[:600]
+        db.commit()
+        return profile_page(request,user,values,"资料已保存。" if saved else "")
+
+    @router.post("/auth/account")
+    async def save_account(request: Request, db=Depends(get_db), user=Depends(manager.require_user)):
+        data = await form(request)
+        check_csrf(request,"profile:"+str(user.id),data.get("csrf"),cfg.base_url)
+        name, avatar = data.get("name", "").strip(), data.get("avatar", "").strip()
+        valid_avatar = not avatar
+        try:
+            parsed = urlsplit(avatar)
+            valid_avatar = valid_avatar or (parsed.scheme == "https" and bool(parsed.hostname) and not parsed.username and not parsed.password)
+        except ValueError:
+            pass
+        values = {"name":name,"avatar":avatar}
+        if (not name or len(name)>120 or len(avatar)>600 or not valid_avatar
+                or any(ord(c)<32 for c in name+avatar)):
+            return profile_page(request,user,values,"请填写姓名和有效的 HTTPS 图片地址。",400)
+        try:
+            token, _ = await read_account(request,db)
+            await manager.provider.account(token,{"name":name,"avatar":avatar or None})
+            # Re-read authoritative data instead of treating a submitted form as saved.
+            _, updated = await read_account(request,db)
+        except (InvalidToken,KeyError):
+            return account_login(request,db)
+        except AccountDenied:
+            return profile_page(request,user,values,"暂时无法保存，请确认账户中心的姓名、头像权限为可编辑。",403)
+        except ProviderUnavailable:
+            return profile_page(request,user,values,"暂时无法确认保存结果，请重新加载资料后重试。",503)
+        user.name = str(updated.get("name") or "")[:120]
+        user.avatar = str(updated.get("avatar") or "")[:600]
+        db.commit()
+        return RedirectResponse("/auth/account?saved=1",status_code=303,headers=NO_STORE)
 
     @router.get("/auth/account/return")
     async def account_return(request: Request, db=Depends(get_db), user=Depends(manager.require_user)):

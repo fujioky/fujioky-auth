@@ -1,6 +1,8 @@
 """Shared account styling and avatar navigation; applications supply optional links."""
 
 CSS = '''
+.profile-intro{display:flex;align-items:center;gap:22px;margin-bottom:32px}.profile-avatar{display:grid;place-items:center;width:80px;height:80px;object-fit:cover;border-radius:50%;background:#eae9e2;font-size:28px}.profile-field{display:block;margin:22px 0;max-width:560px}.profile-field input{display:block;width:100%;margin-top:8px;padding:12px;border:1px solid #deded5;border-radius:6px;background:#eeede6;color:inherit;font:inherit}
+
 *{box-sizing:border-box}body{margin:0;background:#f5f4ef;color:#24251f;font:15px/1.7 Arial,"PingFang SC",sans-serif}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}header{max-width:980px;margin:auto;padding:28px 24px;border-bottom:1px solid #deded5;display:flex;justify-content:space-between;align-items:center}.brand{font-size:12px;font-weight:700;letter-spacing:3px}main{max-width:880px;margin:48px auto;padding:0 24px 64px}h1{font:400 36px/1.25 Georgia,serif;margin:0 0 30px}h2{font-size:17px;margin:0 0 4px}.muted{color:#77786f;overflow-wrap:anywhere}button{font:inherit;border:1px solid #deded5;background:#24251f;color:#f5f4ef;padding:10px 18px;cursor:pointer}button:focus-visible,a:focus-visible{outline:2px solid #c9784e;outline-offset:4px}article{padding:22px 0;border-top:1px solid #deded5}
 '''
 

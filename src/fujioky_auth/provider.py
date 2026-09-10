@@ -14,6 +14,10 @@ class ProviderUnavailable(RuntimeError):
     pass
 
 
+class AccountDenied(RuntimeError):
+    pass
+
+
 class LogtoProvider:
     def __init__(self, config):
         self.config = config
@@ -146,3 +150,29 @@ class LogtoProvider:
                 r.raise_for_status()
         except httpx.HTTPError:
             raise ProviderUnavailable("Remote revocation unavailable") from None
+
+    async def account(self, access_token, changes=None):
+        # The origin is operator-configured, never taken from a form or avatar URL.
+        from urllib.parse import urlsplit
+        issuer = urlsplit(self.config.issuer)
+        url = issuer.scheme + "://" + issuer.netloc + "/api/my-account"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.request("GET" if changes is None else "PATCH", url,
+                    headers={"Authorization": "Bearer " + access_token},
+                    **({} if changes is None else {"json": {k: changes[k] for k in ("name", "avatar") if k in changes}}))
+            if r.status_code == 401:
+                raise InvalidToken("Account token rejected")
+            if r.status_code in (400, 403, 422):
+                raise AccountDenied("Account update not permitted")
+            r.raise_for_status()
+            if changes is not None:
+                return None
+            result = r.json()
+            if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+                raise ValueError("Invalid account response")
+            return result
+        except (httpx.HTTPError, ValueError) as exc:
+            if isinstance(exc, InvalidToken):
+                raise
+            raise ProviderUnavailable("Account temporarily unavailable") from None

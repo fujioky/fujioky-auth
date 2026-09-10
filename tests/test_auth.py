@@ -280,8 +280,8 @@ def test_session_management_and_account_center(env):
     assert client.post("/auth/sessions/revoke",data={**payload,"csrf":"bad"}).status_code==403
     assert client.post("/auth/sessions/revoke",data=payload,follow_redirects=False).status_code==303
     seed(env)
-    r=client.get("/auth/account?section=profile",follow_redirects=False)
-    assert r.headers["location"].startswith("https://auth.test/account/profile?")
+    r=client.get("/auth/account?section=security",follow_redirects=False)
+    assert r.headers["location"].startswith("https://auth.test/account/security?")
     assert parse_qs(urlsplit(r.headers["location"]).query)["redirect"]==[manager.config.base_url+"/auth/account/return"]
     assert client.get("/auth/account?section=../evil").status_code==400
 
@@ -394,8 +394,8 @@ def test_profile_links_are_local_and_available_only_when_signed_in(tmp_path):
         seed((manager, sessions, client))
         assert client.get('/auth/whoami').json()['profileLinks'] == [
             {'href': '/oauth/connections', 'label': 'Authorized clients'}]
-        response = client.get('/auth/account', follow_redirects=False)
-        assert response.headers['location'].startswith('https://auth.test/account/profile?')
+        response = client.get('/auth/account?section=security', follow_redirects=False)
+        assert response.headers['location'].startswith('https://auth.test/account/security?')
 
 
 def test_form_pages_preserve_origin_and_disable_cdn_transforms(env):
@@ -417,3 +417,93 @@ def test_repeated_logout_returns_safely_without_reauthenticating(env):
     response = client.post('/auth/logout', data={**data, 'next':'https://evil.test'}, follow_redirects=False)
     assert response.status_code == 303 and response.headers['location'] == '/'
     assert not client.get('/auth/whoami').json()['signedIn']
+
+
+def profile_provider(manager, *, denied=False):
+    from fujioky_auth.provider import AccountDenied
+    state={"id":"alice@test.com","name":"Alice","avatar":"https://images.test/old.png"}
+    calls=[]
+    async def account(token,changes=None):
+        assert token == 'private-access'
+        if changes is not None:
+            if denied: raise AccountDenied('denied')
+            calls.append(changes)
+            state.update(changes)
+        return dict(state)
+    manager.provider.account=account
+    return state,calls
+
+
+def test_profile_save_uses_current_user_and_syncs(env):
+    manager,sessions,c=env
+    seed(env)
+    state,calls=profile_provider(manager)
+    page=c.get('/auth/account')
+    assert page.status_code==200 and 'private-access' not in page.text
+    data={**fields(page),'name':'New Name','avatar':'','sub':'victim','is_admin':'true'}
+    r=c.post('/auth/account',data=data,headers={'origin':manager.config.base_url},follow_redirects=False)
+    assert r.status_code==303
+    assert calls==[{'name':'New Name','avatar':None}]
+    with sessions() as db:
+        user=db.scalar(select(manager.User)) if hasattr(manager,'User') else db.scalar(select(manager.user_model))
+        assert user.name=='New Name' and user.avatar=='' and not user.is_admin
+
+
+def test_profile_requires_login_and_csrf(env):
+    manager,_,c=env
+    assert c.get('/auth/account',follow_redirects=False).headers['location'].startswith('/auth/login?')
+    seed(env)
+    _,calls=profile_provider(manager)
+    assert c.post('/auth/account',data={'name':'Bob'}).status_code==403
+    data={**fields(c.get('/auth/account')),'name':'Bob','avatar':''}
+    assert c.post('/auth/account',data=data,headers={'origin':'https://evil.test'}).status_code==403
+    assert calls==[]
+
+
+@pytest.mark.parametrize('avatar',['javascript:alert(1)','http://images.test/a','https://user:pass@images.test/a'])
+def test_profile_rejects_unsafe_avatar(env,avatar):
+    manager,_,c=env
+    seed(env);_,calls=profile_provider(manager)
+    r=c.post('/auth/account',data={**fields(c.get('/auth/account')),'name':'Bob','avatar':avatar})
+    assert r.status_code==400 and calls==[]
+
+
+def test_profile_denied_does_not_claim_success(env):
+    manager,_,c=env
+    seed(env);profile_provider(manager,denied=True)
+    r=c.post('/auth/account',data={**fields(c.get('/auth/account')),'name':'Bob','avatar':''})
+    assert r.status_code==403 and '资料已保存' not in r.text
+
+
+def test_profile_rejects_different_account(env):
+    manager,_,c=env
+    seed(env);state,calls=profile_provider(manager);state['id']='victim'
+    r=c.get('/auth/account',follow_redirects=False)
+    assert r.status_code==303 and r.headers['location'].startswith('/auth/login?') and not calls
+
+
+def test_account_api_transport_limits_fields_and_handles_errors(env,monkeypatch):
+    import httpx
+    from fujioky_auth.provider import LogtoProvider, AccountDenied
+    manager,_,_=env
+    seen=[]
+    code=[200]
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(code[0],json={'id':'alice@test.com','name':'Alice'})
+    original=httpx.AsyncClient
+    monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:original(transport=httpx.MockTransport(handler),**kw))
+    provider=LogtoProvider(manager.config)
+    async def exercise():
+        assert (await provider.account('opaque'))['id']=='alice@test.com'
+        await provider.account('opaque',{'name':'Bob','avatar':None,'roles':['admin'],'id':'victim'})
+        code[0]=403
+        with pytest.raises(AccountDenied): await provider.account('opaque',{'name':'Bob'})
+        code[0]=401
+        with pytest.raises(InvalidToken): await provider.account('opaque')
+        code[0]=503
+        with pytest.raises(ProviderUnavailable): await provider.account('opaque')
+    asyncio.run(exercise())
+    assert str(seen[0].url)=='https://auth.test/api/my-account'
+    assert seen[0].headers['authorization']=='Bearer opaque'
+    assert json.loads(seen[1].content)=={'name':'Bob','avatar':None}

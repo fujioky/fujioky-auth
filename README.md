@@ -149,3 +149,9 @@ profile_links=({"href": "/oauth/connections", "label": "Authorized applications"
 
 Only local paths are accepted. Each application retains independent sessions
 and displays only the current user's information.
+
+## Profile page
+
+`/auth/account` renders the shared profile page using Logto Account API, available without profile-collection fields. Enable Account API and set Name and Avatar permissions to Edit. The user's existing `profile` scope and opaque access token are used server-side.
+
+Users can edit their display name and an HTTPS avatar image URL, or clear the avatar. The endpoint only updates these two fields. Security settings remain at `/auth/account?section=security`. Logged-out visitors are sent through normal login before returning.
