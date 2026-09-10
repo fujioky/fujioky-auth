@@ -167,3 +167,9 @@ The portal provides profile editing, security links, verified session management
 Applications set `ACCOUNT_PORTAL_URL` to use the central account menu. Applications sharing the same Logto client register their own callback and logged-out URLs. Configure the Logto back-channel URI to the portal and set `LOGOUT_TARGETS` to the other applications' fixed HTTPS back-channel endpoints. Only validated logout tokens are forwarded; recipients verify them independently. Failed delivery returns 503 and can be retried with the same token.
 
 For BIDE MCP grants, optionally set `BIDE_ACCOUNT_API` to the HTTPS `/api/account/connections` endpoint. It resolves the caller via Logto userinfo and restricts grants by the verified subject.
+
+
+### Account interaction design
+
+The portal follows the step-based interaction structure of [Logto Account Center](https://github.com/logto-io/logto/tree/master/packages/account): verification method, code delivery, code entry, then the requested action. The Python views and CSS are implemented here; the upstream React app is not bundled.
+Email and password changes run within the portal through the documented Account API. Email replacement requires separate identity and new-email verification records. Initial OIDC authentication and third-party social authorization still use their respective providers.

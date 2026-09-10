@@ -63,10 +63,17 @@ def page(config, title, body, form_redirect=None):
         headers["Content-Security-Policy"] = headers["Content-Security-Policy"].replace(
             "form-action 'self';", "form-action 'self' " + destination + ";")
     esc = html.escape
+    styling = CSS
     if config.standalone:
+        from .portal_style import STYLE
+        styling += STYLE
         body = '<nav class="account-tabs" aria-label="账户导航"><a href="/auth/account">个人资料</a><a href="/security">账号与安全</a><a href="/sessions">登录设备</a><a href="/apps">已授权应用</a></nav>'+body
+        active = {'个人资料':'/auth/account','账号与安全':'/security','登录设备':'/sessions','已授权应用':'/apps'}.get(title)
+        if active: body = body.replace('href="'+active+'"', 'aria-current="page" href="'+active+'"', 1)
         body = body.replace('/auth/account?section=security','/security').replace('href="/auth/sessions"','href="/sessions"')
-    return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+CSS+'</style><header><a class="brand" href="/">'+esc(config.app_name.upper())+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main><script src="/auth/ui.js" defer></script></html>', headers=headers)
+    if config.standalone:
+        body += '<footer class="account-footer">FUJIOKY · OKY &amp; Company</footer>'
+    return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+styling+'</style><header><a class="brand" href="/">'+esc(config.app_name.upper())+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main><script src="/auth/ui.js" defer></script></html>', headers=headers)
 
 
 def hidden(name, value):

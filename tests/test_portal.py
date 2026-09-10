@@ -57,3 +57,44 @@ def test_logout_relay_validates_and_retries(env):
     assert attempts==[raw,raw]
 
 from test_auth import env
+
+
+def test_native_changes_require_two_distinct_verifications(tmp_path):
+    app=create_app({'BASE_URL':'https://account.test','SESSION_SECRET':'x'*40,
+        'OIDC_ISSUER':'https://auth.test/oidc','OIDC_CLIENT_ID':'bide-client','OIDC_CLIENT_SECRET':'secret',
+        'DATABASE_URL':'sqlite:///'+str(tmp_path/'changes.db')})
+    m=app.state.manager
+    calls=[]
+    async def account(token):return {'id':'alice@test.com','primaryEmail':'alice@test.com'}
+    m.provider.account=account
+    async def api(token,method,path,data=None,verification=''):
+        calls.append((path,data,verification))
+        if path=='/api/verifications/password':return {'verificationRecordId':'identity-proof'}
+        if path=='/api/verifications/verification-code':return {'verificationRecordId':'new-email-proof'}
+        return None
+    m.provider.account_request=api
+    def csrf_of(response):return re.search(r'name="csrf" value="([^"]+)',response.text)[1]
+    with TestClient(app,base_url='https://account.test') as c:
+        seed((m,app.state.sessions,c))
+        r=c.get('/security/change/email')
+        assert r.status_code==200 and '发送验证码' in r.text
+        assert r.text.count('<form ')==1 and 'name="password"' not in r.text
+        assert 'auth.test/account' not in r.text
+        r=c.post('/verify',data={'csrf':csrf_of(r),'method':'password','password':'existing','next':'/security/change/email'})
+        assert 'name="email"' in r.text
+        change_csrf=csrf_of(r)
+        r=c.post('/security/change/email',data={'csrf':change_csrf,'step':'send','email':'new@example.com'})
+        assert 'name="code"' in r.text and 'name="email"' not in r.text
+        r=c.post('/security/change/email',data={'csrf':change_csrf,'step':'confirm','email':'forged@example.com','code':'123456'})
+        assert '邮箱已更新' in r.text
+        assert calls[-1]==('/api/my-account/primary-email',{'email':'new@example.com','newIdentifierVerificationRecordId':'new-email-proof'},'identity-proof')
+        # The short-lived local proof is consumed after the update.
+        r=c.get('/security/change/password')
+        assert '发送验证码' in r.text
+        r=c.post('/verify',data={'csrf':csrf_of(r),'method':'password','password':'existing','next':'/security/change/password'})
+        n=len(calls)
+        bad=c.post('/security/change/password',data={'csrf':csrf_of(r),'password':'long-password','confirmation':'different'})
+        assert '不一致' in bad.text and len(calls)==n
+        good=c.post('/security/change/password',data={'csrf':csrf_of(r),'password':'long-password','confirmation':'long-password'})
+        assert '密码已更新' in good.text
+        assert calls[-1]==('/api/my-account/password',{'password':'long-password'},'identity-proof')

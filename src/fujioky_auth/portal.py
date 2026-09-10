@@ -76,11 +76,36 @@ def create_app(env=None):
     def verification(request,db):
         row=db.get(Verification,request.state.auth_session.id)
         return manager.decrypt(row.value) if row and row.verified and row.expires>now() else None
-    def verify_page(request,destination,error=''):
-        body='<p>查看设备和授权前，请验证身份。</p><p role="status">'+esc(error)+'</p>'
-        for method,label,inputs in [('password','验证密码','<label class="profile-field">当前密码<input name="password" type="password" autocomplete="current-password" required></label>'),('send','发送邮箱验证码',''),('code','验证邮箱','<label class="profile-field">邮箱验证码<input name="code" inputmode="numeric" autocomplete="one-time-code" required></label>')]:
-            body+='<form class="account-card" method="post" action="/verify">'+hidden('csrf',csrf(request,'verify'))+hidden('next',destination)+hidden('method',method)+inputs+'<button>'+label+'</button></form>'
-        return page(config,'验证身份',body)
+    destinations=('/sessions','/apps','/security/change/email','/security/change/password')
+    async def verify_page(request,destination,error='',stage=None):
+        row=request.state.auth_session
+        account=await manager.provider.account(manager.decrypt(row.tokens)['access_token'])
+        has_password=account.get('hasPassword', False)
+        has_email=bool(account.get('primaryEmail'))
+        stage=stage or request.query_params.get('method','email')
+        if stage not in ('email','password','code'):stage='email'
+        if not has_email and stage=='email' and has_password:stage='password'
+        suffix=urlencode({'next':destination})
+        email=account.get('primaryEmail') or getattr(getattr(request.state,'user',None),'email','')
+        body='<section class="flow"><a class="back" href="/security">← 返回账户安全</a><div class="step">身份验证</div>'
+        body+='<h2>'+('验证您的密码' if stage=='password' else '输入验证码' if stage=='code' else '验证您的邮箱')+'</h2>'
+        body+='<p class="description">'+('请输入当前密码，以确认是您本人。' if stage=='password' else '验证码已发送至 '+esc(email)+'。请在有效期内输入，完成后继续。' if stage=='code' else '为保护账户安全，请确认是您本人。我们会向您的邮箱发送验证码。')+'</p>'
+        if error:body+='<p class="feedback" role="status">'+esc(error)+'</p>'
+        method={'email':'send','password':'password','code':'code'}[stage]
+        body+='<form method="post" action="/verify">'+hidden('csrf',csrf(request,'verify'))+hidden('next',destination)+hidden('method',method)
+        if stage=='password':body+='<label class="profile-field"><span class="field-label">当前密码</span><input name="password" type="password" autocomplete="current-password" required autofocus></label>'
+        elif stage=='code':body+='<label class="profile-field"><span class="field-label">邮箱验证码</span><input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" required autofocus></label>'
+        else:body+='<label class="profile-field"><span class="field-label">邮箱地址</span><input type="email" value="'+esc(email)+'" readonly></label>'
+        body+='<button type="submit">'+('发送验证码' if stage=='email' else '验证并继续')+'</button></form>'
+        alternate='email' if stage=='password' else 'password'
+        if (alternate=='email' and has_email) or (alternate=='password' and has_password):
+            body+='<p class="alternative"><a href="/verify?'+suffix+'&method='+alternate+'">'+('使用邮箱验证码' if alternate=='email' else '使用密码验证')+'</a></p>'
+        if stage=='code':body+='<p class="alternative"><a href="/verify?'+suffix+'&method=email">没有收到？重新发送</a></p>'
+        return page(config,'验证身份',body+'</section>')
+    @app.get('/verify')
+    async def verification_start(request:Request,next:str='/sessions',user=Depends(manager.require_user)):
+        if next not in destinations:raise HTTPException(400)
+        return await verify_page(request,next)
     @app.get('/healthz')
     def health():return {'ok':True,'configured':config.ready}
     @app.get('/')
@@ -91,16 +116,72 @@ def create_app(env=None):
         account=await manager.provider.account(await token(request,db))
         body='<p class="muted">管理你的登录方式。修改时会要求验证身份。</p>'
         for label,value,action in [('电子邮箱',account.get('primaryEmail') or user.email,'email'),('密码','已设置' if account.get('hasPassword') else '设置或更改密码','password')]:
-            body+='<section class="account-card account-row"><div><h2>'+label+'</h2><p>'+esc(value)+'</p></div><a href="/security/change/'+action+'">修改 ↗</a></section>'
+            body+='<section class="account-card account-row"><div><h2>'+label+'</h2><p>'+esc(value)+'</p></div><a href="/security/change/'+action+'">管理 →</a></section>'
         return page(config,'账号与安全',body)
+    def edit_page(request,action,error='',pending=None):
+        title='设置新密码' if action=='password' else '验证新邮箱' if pending else '更改邮箱'
+        body='<section class="flow"><a class="back" href="/security">← 返回账户安全</a><div class="step">'+('设置密码' if action=='password' else '更新联系方式')+'</div><h2>'+title+'</h2>'
+        body+='<p class="description">'+('使用独立且难以猜测的密码来保护您的账户。' if action=='password' else '请输入发送至 '+esc(pending['email'])+' 的验证码。' if pending else '验证新的邮箱后，它将成为您的登录和联系邮箱。')+'</p>'
+        if error:body+='<p class="feedback" role="status">'+esc(error)+'</p>'
+        body+='<form method="post" action="/security/change/'+action+'">'+hidden('csrf',csrf(request,'change:'+action))
+        if action=='password':
+            body+='<label class="profile-field"><span class="field-label">新密码</span><input type="password" name="password" autocomplete="new-password" required maxlength="1024"></label><label class="profile-field"><span class="field-label">确认新密码</span><input type="password" name="confirmation" autocomplete="new-password" required maxlength="1024"></label>'
+        elif pending:
+            body+=hidden('step','confirm')+'<label class="profile-field"><span class="field-label">验证码</span><input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="12" autofocus></label>'
+        else:body+=hidden('step','send')+'<label class="profile-field"><span class="field-label">新邮箱地址</span><input name="email" type="email" autocomplete="email" required maxlength="254" autofocus></label>'
+        body+='<button type="submit">'+('保存新密码' if action=='password' else '确认更改' if pending else '发送验证码')+'</button></form>'
+        if pending:body+='<p class="alternative"><a href="/security/change/email">更换邮箱或重新发送</a></p>'
+        return page(config,title,body+'</section>')
     @app.get('/security/change/{action}')
-    def change(action:str,user=Depends(manager.require_user)):
+    async def change(action:str,request:Request,db=Depends(get_db),user=Depends(manager.current_user)):
         if action not in ('email','password'):raise HTTPException(404)
-        return back(config.account_center+'/'+action+'?'+urlencode({'redirect':config.base_url+'/security'}))
+        if not user:return back('/auth/login?next=/security/change/'+action)
+        if not verification(request,db):return await verify_page(request,'/security/change/'+action)
+        return edit_page(request,action)
+    @app.post('/security/change/{action}')
+    async def save_change(action:str,request:Request,db=Depends(get_db),user=Depends(manager.require_user)):
+        if action not in ('email','password'):raise HTTPException(404)
+        data=await form(request);check_csrf(request,'change:'+action,data.get('csrf'),config.base_url)
+        verified=verification(request,db)
+        if not verified:return await verify_page(request,'/security/change/'+action,'验证已过期，请重新确认身份。')
+        access=await token(request,db)
+        pending=None
+        binding_id='binding:'+request.state.auth_session.id
+        row=db.get(Verification,binding_id)
+        try:
+            if action=='password':
+                password=data.get('password','')
+                if not password or len(password)>1024 or password!=data.get('confirmation'):
+                    return edit_page(request,action,'两次输入的密码不一致，请重新填写。')
+                await manager.provider.account_request(access,'POST','/api/my-account/password',{'password':password},verified['id'])
+            elif data.get('step')=='send':
+                email=data.get('email','').strip()
+                if len(email)>254 or '@' not in email or any(c.isspace() for c in email):
+                    return edit_page(request,action,'请填写有效的邮箱地址。')
+                if row and row.sent>now()-60:return edit_page(request,action,'请稍等一分钟再发送。')
+                result=await manager.provider.account_request(access,'POST','/api/verifications/verification-code',{'identifier':{'type':'email','value':email}})
+                pending={'id':result['verificationRecordId'],'email':email}
+                row=row or Verification(id=binding_id)
+                row.value=manager.encrypt(pending);row.expires=now()+600;row.sent=now();db.add(row);db.commit()
+                return edit_page(request,action,pending=pending)
+            elif data.get('step')=='confirm':
+                if not row or row.expires<=now():return edit_page(request,action,'验证码已过期，请重新发送。')
+                pending=manager.decrypt(row.value)
+                await manager.provider.account_request(access,'POST','/api/verifications/verification-code/verify',{'identifier':{'type':'email','value':pending['email']},'verificationId':pending['id'],'code':data.get('code','')})
+                await manager.provider.account_request(access,'POST','/api/my-account/primary-email',{'email':pending['email'],'newIdentifierVerificationRecordId':pending['id']},verified['id'])
+                db.delete(row)
+            else:raise HTTPException(400)
+            # A sensitive update consumes our short-lived local verification.
+            verified_row=db.get(Verification,request.state.auth_session.id)
+            if verified_row:db.delete(verified_row)
+            db.commit()
+            return page(config,'更新成功','<section class="flow"><div class="step">已完成</div><h2>'+('密码已更新' if action=='password' else '邮箱已更新')+'</h2><p class="description">您的更改已保存。</p><a class="back" href="/security">返回账户安全 →</a></section>')
+        except AccountDenied:return edit_page(request,action,'操作未完成。请检查验证码、邮箱是否可用，或密码是否符合账户密码规则。',pending)
+        except InvalidToken:return await verify_page(request,'/security/change/'+action,'验证已失效，请重新确认身份。')
     @app.post('/verify')
     async def verify(request:Request,db=Depends(get_db),user=Depends(manager.require_user)):
         data=await form(request);check_csrf(request,'verify',data.get('csrf'),config.base_url)
-        destination=data.get('next') if data.get('next') in ('/sessions','/apps') else '/sessions'
+        destination=data.get('next') if data.get('next') in destinations else '/sessions'
         sid=request.state.auth_session.id
         row=db.get(Verification,sid)
         access=await token(request,db)
@@ -112,7 +193,7 @@ def create_app(env=None):
                 result=await manager.provider.account_request(access,'POST','/api/verifications/password',{'password':password})
                 record=result['verificationRecordId']
             elif method=='send':
-                if row and row.sent>now()-60:return verify_page(request,destination,'请稍等一分钟再发送。')
+                if row and row.sent>now()-60:return await verify_page(request,destination,'请稍等一分钟再发送。')
                 # The recipient comes from Logto, never from the browser form.
                 account=await manager.provider.account(access)
                 email=account.get('primaryEmail')
@@ -121,7 +202,7 @@ def create_app(env=None):
                 row=row or Verification(id=sid)
                 row.value=manager.encrypt({'id':result['verificationRecordId'],'email':email})
                 row.expires=now()+600;row.sent=now();row.verified=False;db.add(row);db.commit()
-                return verify_page(request,destination,'验证码已发送，请查看邮箱。')
+                return await verify_page(request,destination,stage='code')
             elif method=='code':
                 if not row or row.verified or row.expires<=now():raise AccountDenied()
                 pending=manager.decrypt(row.value)
@@ -133,7 +214,7 @@ def create_app(env=None):
             row.value=manager.encrypt({'id':record});row.expires=now()+540;row.verified=True
             db.add(row);db.commit()
             return back(destination)
-        except (AccountDenied,InvalidToken,KeyError):return verify_page(request,destination,'验证未通过，请检查后重试。')
+        except (AccountDenied,InvalidToken,KeyError):return await verify_page(request,destination,'验证未通过，请检查后重试。',stage='code' if method=='code' else 'password' if method=='password' else 'email')
     def items(result,key):
         if not isinstance(result,dict) or not isinstance(result.get(key),list):raise ProviderUnavailable()
         return result[key]
@@ -143,11 +224,11 @@ def create_app(env=None):
         section=request.url.path.strip('/')
         if not user:return back('/auth/login?next=/'+section)
         verified=verification(request,db)
-        if not verified:return verify_page(request,'/'+section)
+        if not verified:return await verify_page(request,'/'+section)
         key='sessions' if section=='sessions' else 'grants'
         try:
             result=await manager.provider.account_request(await token(request,db),'GET','/api/my-account/'+key,verification=verified['id'])
-        except (InvalidToken,AccountDenied):return verify_page(request,'/'+section,'请重新验证身份，或重新登录以更新账户权限。')
+        except (InvalidToken,AccountDenied):return await verify_page(request,'/'+section,'请重新验证身份，或重新登录以更新账户权限。')
         body=''
         for item in items(result,key):
             payload=item.get('payload',{})
@@ -178,7 +259,7 @@ def create_app(env=None):
     async def revoke_mcp(request:Request,db=Depends(get_db),user=Depends(manager.require_user)):
         data=await form(request);ident=data.get('id','')
         check_csrf(request,'mcp:'+ident,data.get('csrf'),config.base_url)
-        if not verification(request,db):return verify_page(request,'/apps')
+        if not verification(request,db):return await verify_page(request,'/apps')
         if not ident or len(ident)>200:raise HTTPException(400)
         await mcp_request(await token(request,db),'DELETE',ident)
         return back('/apps')
@@ -188,7 +269,7 @@ def create_app(env=None):
         data=await form(request);ident=data.get('id','')
         check_csrf(request,'revoke:'+section+':'+ident,data.get('csrf'),config.base_url)
         verified=verification(request,db)
-        if not verified:return verify_page(request,'/'+section)
+        if not verified:return await verify_page(request,'/'+section)
         if not ident or len(ident)>200:raise HTTPException(400)
         key='sessions' if section=='sessions' else 'grants'
         path='/api/my-account/'+key+'/'+quote(ident,safe='')
