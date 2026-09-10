@@ -3,7 +3,7 @@ import hmac
 import html
 import secrets
 from datetime import datetime, timezone
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -55,9 +55,15 @@ async def form(request):
     return result
 
 
-def page(config, title, body):
+def page(config, title, body, form_redirect=None):
+    headers = dict(PAGE_HEADERS)
+    if form_redirect:
+        target = urlsplit(form_redirect)
+        destination = target.scheme + "://" + quote(target.netloc, safe="[]:.-")
+        headers["Content-Security-Policy"] = headers["Content-Security-Policy"].replace(
+            "form-action 'self';", "form-action 'self' " + destination + ";")
     esc = html.escape
-    return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+CSS+'</style><header><a class="brand" href="/">'+esc(config.app_name.upper())+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main><script src="/auth/ui.js" defer></script></html>', headers=PAGE_HEADERS)
+    return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+CSS+'</style><header><a class="brand" href="/">'+esc(config.app_name.upper())+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main><script src="/auth/ui.js" defer></script></html>', headers=headers)
 
 
 def hidden(name, value):
@@ -150,7 +156,7 @@ def build_router(manager):
         return response
 
     @router.get("/auth/logout")
-    def logout_page(request: Request, next: str = "/", db=Depends(get_db)):
+    async def logout_page(request: Request, next: str = "/", db=Depends(get_db)):
         row = manager.session(request, db)
         if not row:
             response = RedirectResponse(safe_next(next), status_code=302, headers=NO_STORE)
@@ -158,14 +164,22 @@ def build_router(manager):
             return response
         body = '<p>退出本应用，并结束当前统一登录会话。其他应用会在收到注销通知后退出。</p>'
         body += '<form method="post" action="/auth/logout">'+hidden("csrf",csrf(request,"logout:"+row.id))+hidden("next",safe_next(next))+'<button>确认退出</button></form>'
-        return page(cfg, "退出登录", body)
+        destination = cfg.issuer
+        if cfg.ready:
+            try:
+                destination = await manager.provider.endpoint("end_session_endpoint")
+            except ProviderUnavailable:
+                pass
+        return page(cfg, "退出登录", body, form_redirect=destination)
 
     @router.post("/auth/logout")
     async def logout(request: Request, db=Depends(get_db)):
         data = await form(request)
         row = manager.session(request, db)
         if not row:
-            raise HTTPException(401)
+            response = RedirectResponse(safe_next(data.get("next")), status_code=303, headers=NO_STORE)
+            manager.clear_cookie(response)
+            return response
         check_csrf(request,"logout:"+row.id,data.get("csrf"),cfg.base_url)
         try:
             token = manager.decrypt(row.tokens)

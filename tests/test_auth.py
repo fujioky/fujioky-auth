@@ -239,6 +239,7 @@ def test_logout_form_csrf_provider_and_state(env):
     manager.provider.endpoint,manager.provider.revoke=endpoint,revoke
     r=client.get("/auth/logout?next=/dashboard")
     assert r.status_code==200 and client.get("/auth/whoami").json()["signedIn"]
+    assert "form-action 'self' https://auth.test;" in r.headers['content-security-policy']
     data=fields(r)
     assert client.post("/auth/logout",data={**data,"csrf":"bad"}).status_code==403
     r=client.post("/auth/logout",data=data,follow_redirects=False)
@@ -406,3 +407,13 @@ def test_form_pages_preserve_origin_and_disable_cdn_transforms(env):
         assert r.headers['referrer-policy'] == 'same-origin'
         assert 'no-store' in r.headers['cache-control']
         assert 'no-transform' in r.headers['cache-control']
+
+
+def test_repeated_logout_returns_safely_without_reauthenticating(env):
+    manager, _, client = env
+    seed(env, tokens=False)
+    data = fields(client.get('/auth/logout'))
+    assert client.post('/auth/logout', data=data, follow_redirects=False).status_code == 303
+    response = client.post('/auth/logout', data={**data, 'next':'https://evil.test'}, follow_redirects=False)
+    assert response.status_code == 303 and response.headers['location'] == '/'
+    assert not client.get('/auth/whoami').json()['signedIn']
