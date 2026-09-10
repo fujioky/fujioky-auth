@@ -91,20 +91,10 @@ For every new app, register its own normal Logto Web application. Reusing this
 Python package does not mean reusing another application's client secret or cookies.
 The user's Logto login session provides SSO between the apps.
 
-| Logto setting | BIDE | NOTE |
-| --- | --- | --- |
-| Application name | BIDE | NOTE |
-| Redirect URI | https://bide.example.com/auth/callback | https://note.example.com/auth/callback |
-| Post logout redirect URI | https://bide.example.com/auth/logged-out | https://note.example.com/auth/logged-out |
-| Back-channel logout URI | https://bide.example.com/auth/backchannel-logout | https://note.example.com/auth/backchannel-logout |
-| Session required for back-channel logout | On | On |
-| Always issue refresh token | Off | Off |
-| Rotate refresh token | On | On |
-| Refresh token lifetime | 14 days | 14 days |
-| CORS allowed origins | Empty: server-side OIDC | Empty: server-side OIDC |
-| Custom data | {} until there is an actual consumer | {} |
-| Token exchange | Off: no impersonation/PAT requirement | Off |
-| Concurrent device limit | Leave empty unless a limit is desired | Same |
+Register each application's callback (`/auth/callback`), post-logout
+redirect (`/auth/logged-out`) and back-channel logout (`/auth/backchannel-logout`)
+under its own hostname. Enable refresh token rotation and select the session
+lifetime appropriate for your deployment. All domains in this document are examples.
 
 Enable Account API in Logto's Sign-in & account → Account center. Allow editing
 name/avatar and the account fields you intend to offer. The app provides profile,
