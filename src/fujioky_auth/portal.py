@@ -51,6 +51,9 @@ def create_app(env=None):
         upsert_user=lambda db,c:upsert_standard_user(db,User,c,lambda _:False))
     Base.metadata.create_all(engine)
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
+    from pathlib import Path
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/brand", StaticFiles(directory=Path(__file__).with_name("assets")), name="brand")
     app.state.manager=manager
     app.state.sessions=factory
     targets=[x.strip() for x in env.get('LOGOUT_TARGETS','').split(',') if x.strip()]

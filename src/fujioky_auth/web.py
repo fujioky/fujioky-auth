@@ -71,9 +71,13 @@ def page(config, title, body, form_redirect=None):
         active = {'个人资料':'/auth/account','账号与安全':'/security','登录设备':'/sessions','已授权应用':'/apps'}.get(title)
         if active: body = body.replace('href="'+active+'"', 'aria-current="page" href="'+active+'"', 1)
         body = body.replace('/auth/account?section=security','/security').replace('href="/auth/sessions"','href="/sessions"')
+    brand = esc(config.app_name.upper())
+    footer = ''
     if config.standalone:
-        body += '<footer class="account-footer">FUJIOKY · OKY &amp; Company</footer>'
-    return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+styling+'</style><header><a class="brand" href="/">'+esc(config.app_name.upper())+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main><script src="/auth/ui.js" defer></script></html>', headers=headers)
+        brand = '<picture><source media="(prefers-color-scheme: dark)" srcset="/brand/logo-dark.png"><img src="/brand/logo-light.png" alt="FUJIOKY" width="160" height="48"></picture>'
+        year = datetime.now(timezone.utc).year
+        footer = '<footer class="account-footer"><span>© '+str(year)+' OKY &amp; Company. All rights reserved.</span><span>账户中心</span></footer>'
+    return HTMLResponse('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · '+esc(config.app_name.upper())+'</title><style>'+styling+'</style><header><a class="brand" href="/">'+brand+'</a><span data-lyra-auth></span></header><main><h1>'+esc(title)+'</h1>'+body+'</main>'+footer+'<script src="/auth/ui.js" defer></script></html>', headers=headers)
 
 
 def hidden(name, value):
