@@ -31,7 +31,7 @@ function hide(){toggle.setAttribute('aria-expanded','false');wrap.removeAttribut
 wrap.addEventListener('pointerenter',function(e){if(e.pointerType==='mouse'||e.pointerType==='pen')show();});wrap.addEventListener('pointerleave',function(){if(!wrap.contains(document.activeElement))hide();});
 wrap.addEventListener('focusin',function(e){if(e.target!==toggle)show();});wrap.addEventListener('focusout',function(e){if(!wrap.contains(e.relatedTarget))hide();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&wrap.hasAttribute('data-open')){e.preventDefault();avatar.focus();hide();}});
-wrap.addEventListener('keydown',function(e){if(e.key==='ArrowDown'&&e.target===avatar){e.preventDefault();show();inner.querySelector('a').focus();}});
+wrap.addEventListener('keydown',function(e){if(e.key==='ArrowDown'&&e.target===avatar){e.preventDefault();show();requestAnimationFrame(function(){inner.querySelector('a').focus();});}});
 document.addEventListener('pointerdown',function(e){if(!wrap.contains(e.target))hide();});
 });}).catch(function(){slots.forEach(function(s){if(s.children.length)return;var a=document.createElement('a');a.href='/auth/account?section=profile';a.textContent='个人账户';s.appendChild(a);});});
 })();
