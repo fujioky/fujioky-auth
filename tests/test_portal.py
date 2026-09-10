@@ -98,3 +98,14 @@ def test_native_changes_require_two_distinct_verifications(tmp_path):
         good=c.post('/security/change/password',data={'csrf':csrf_of(r),'password':'long-password','confirmation':'long-password'})
         assert '密码已更新' in good.text
         assert calls[-1]==('/api/my-account/password',{'password':'long-password'},'identity-proof')
+
+
+def test_portal_administrator_is_bound_to_subject(tmp_path):
+    app=create_app({'BASE_URL':'https://account.test','SESSION_SECRET':'x'*40,
+        'DATABASE_URL':'sqlite:///'+str(tmp_path/'admin.db'),'ADMIN_SUBJECTS':'owner-sub'})
+    with app.state.sessions() as db:
+        owner,_=app.state.manager.upsert_user(db,{'sub':'owner-sub','email':'owner@example.com','email_verified':True})
+        other,_=app.state.manager.upsert_user(db,{'sub':'other-sub','email':'other@example.com','email_verified':True})
+        assert owner.is_admin and not other.is_admin
+        owner,_=app.state.manager.upsert_user(db,{'sub':'owner-sub','email':'owner@example.com','email_verified':True})
+        assert owner.is_admin

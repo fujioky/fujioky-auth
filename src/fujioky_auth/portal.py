@@ -47,8 +47,9 @@ def create_app(env=None):
     factory=sessionmaker(engine,expire_on_commit=False)
     def get_db():
         with factory() as db: yield db
+    admin_subjects={x.strip() for x in env.get('ADMIN_SUBJECTS','').split(',') if x.strip()}
     manager=AuthManager(config,base=Base,get_db=get_db,user_model=User,
-        upsert_user=lambda db,c:upsert_standard_user(db,User,c,lambda _:False))
+        upsert_user=lambda db,c:upsert_standard_user(db,User,c,lambda claims:claims.get('sub') in admin_subjects))
     Base.metadata.create_all(engine)
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
     from pathlib import Path
