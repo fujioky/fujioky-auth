@@ -15,7 +15,7 @@ from .provider import InvalidToken, ProviderUnavailable
 from .ui import CSS, JS
 
 NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
-PAGE_HEADERS = {**NO_STORE, "X-Frame-Options": "DENY", "Content-Security-Policy":
+PAGE_HEADERS = {**NO_STORE, "Referrer-Policy": "same-origin", "Cache-Control": "no-store, no-transform", "X-Frame-Options": "DENY", "Content-Security-Policy":
                 "default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self' https: data:; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}
 
 

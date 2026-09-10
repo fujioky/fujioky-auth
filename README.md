@@ -1,6 +1,6 @@
 # fujioky-auth
 
-A reusable Python package for FastAPI applications using Logto. Version 0.2.1.
+A reusable Python package for FastAPI applications using Logto. Version 0.2.2.
 No extra authentication service or database is required. Each application retains
 its own users, database, cookie, Logto client and authorization policy.
 
@@ -24,7 +24,7 @@ the local user ID, preserving associations with private data.
 Install the versioned source from GitHub (not published to PyPI):
 
 ```sh
-pip install "fujioky-auth @ git+https://github.com/fujioky/fujioky-auth.git@v0.2.1"
+pip install "fujioky-auth @ git+https://github.com/fujioky/fujioky-auth.git@v0.2.2"
 ```
 
 For development:

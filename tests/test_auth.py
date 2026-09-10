@@ -395,3 +395,14 @@ def test_profile_links_are_local_and_available_only_when_signed_in(tmp_path):
             {'href': '/oauth/connections', 'label': 'Authorized clients'}]
         response = client.get('/auth/account', follow_redirects=False)
         assert response.headers['location'].startswith('https://auth.test/account/profile?')
+
+
+def test_form_pages_preserve_origin_and_disable_cdn_transforms(env):
+    _, _, client = env
+    seed(env)
+    for path in ('/auth/sessions', '/auth/logout'):
+        r = client.get(path)
+        assert r.status_code == 200
+        assert r.headers['referrer-policy'] == 'same-origin'
+        assert 'no-store' in r.headers['cache-control']
+        assert 'no-transform' in r.headers['cache-control']
